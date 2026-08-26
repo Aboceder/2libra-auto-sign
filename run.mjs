@@ -7,7 +7,7 @@ const DRY_RUN = isTrue(process.env.DRY_RUN);
 const BADGE_RESTORE_WAIT_MINUTES = parsePositiveInteger(process.env.BADGE_RESTORE_WAIT_MINUTES, 11);
 const SUMMARY_PATH = process.env.GITHUB_STEP_SUMMARY || '';
 // 固定触发徽章：仅当当前已佩戴该徽章时，才执行徽章摘除与恢复流程。
-const BADGE_FLOW_TRIGGER_BADGE_ID = 'e78fbfa8-628e-4e97-9ec1-7216c24091d5';
+const BADGE_FLOW_TRIGGER_BADGE_ID = '8c0d4c23-d22b-4f22-9d18-7088d6d0667d';
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
