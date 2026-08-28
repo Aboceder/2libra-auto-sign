@@ -389,10 +389,40 @@ async function main() {
     }
   }
 
-  // 第二阶段：可选统一摘除指定徽章（失败只记录，不影响后续签到）。
+  // 第二阶段：统一检查今日签到状态。
+  for (const context of contexts) {
+    if (!context.active) continue;
+
+    try {
+      const checkResult = await checkToday(context.accessToken);
+      if (!checkResult.ok) {
+        markFailure(context, 'check', 'check_failed', checkResult.message);
+        log('ERROR', `${context.account.label} check_failed - ${checkResult.message}`);
+        continue;
+      }
+
+      if (checkResult.signed) {
+        context.result.signedToday = 'yes';
+        context.result.action = 'none';
+        context.result.status = 'already_signed';
+        context.result.message = mergeResultMessage('今天已签到', context.result.message);
+        context.result.success = true;
+        log('OK', `${context.account.label} already_signed - 今天已签到，跳过徽章处理`);
+        continue;
+      }
+
+      context.result.signedToday = 'no';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      markFailure(context, 'sign', 'sign_failed', message);
+      log('ERROR', `${context.account.label} sign_failed - ${message}`);
+    }
+  }
+
+  // 第三阶段：对未签到的账号执行徽章摘除。
   if (badgeFlowEnabled) {
-    const badgeContexts = contexts.filter((context) => context.active);
-    for (const context of badgeContexts) {
+    const pendingContexts = contexts.filter((context) => context.active && context.result.signedToday !== 'yes');
+    for (const context of pendingContexts) {
       try {
         const userInfoResult = await getUserInfo(context.accessToken);
         if (!userInfoResult.ok) {
@@ -424,30 +454,11 @@ async function main() {
     }
   }
 
-  // 第三阶段：统一执行签到。
+  // 第四阶段：统一执行签到。
   for (const context of contexts) {
-    if (!context.active) continue;
+    if (!context.active || context.result.signedToday === 'yes') continue;
 
     try {
-      const checkResult = await checkToday(context.accessToken);
-      if (!checkResult.ok) {
-        markFailure(context, 'check', 'check_failed', checkResult.message);
-        log('ERROR', `${context.account.label} check_failed - ${checkResult.message}`);
-        continue;
-      }
-
-      if (checkResult.signed) {
-        context.result.signedToday = 'yes';
-        context.result.action = 'none';
-        context.result.status = 'already_signed';
-        context.result.message = mergeResultMessage('今天已签到', context.result.message);
-        context.result.success = true;
-        log('OK', `${context.account.label} already_signed - 今天已签到`);
-        continue;
-      }
-
-      context.result.signedToday = 'no';
-
       if (DRY_RUN) {
         context.result.action = 'dry_run';
         context.result.status = 'skipped';
@@ -476,7 +487,7 @@ async function main() {
     }
   }
 
-  // 第四阶段：统一佩戴指定徽章（失败只记录，不影响签到结果）。
+  // 第五阶段：统一佩戴指定徽章（失败只记录，不影响签到结果）。
   if (badgeFlowEnabled) {
     const contextsNeedEquip = contexts.filter((context) => context.active && context.needsReequip);
     if (contextsNeedEquip.length > 0) {
