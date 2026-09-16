@@ -6,8 +6,9 @@ const ACCOUNT_FILTER = (process.env.ACCOUNT_FILTER || '').trim();
 const DRY_RUN = isTrue(process.env.DRY_RUN);
 const BADGE_RESTORE_WAIT_MINUTES = parsePositiveInteger(process.env.BADGE_RESTORE_WAIT_MINUTES, 11);
 const SUMMARY_PATH = process.env.GITHUB_STEP_SUMMARY || '';
-// 固定触发徽章：仅当当前已佩戴该徽章时，才执行徽章摘除与恢复流程。
-const BADGE_FLOW_TRIGGER_BADGE_ID = '8c0d4c23-d22b-4f22-9d18-7088d6d0667d';
+// 未签到账号先佩戴该徽章，签到完成后再佩戴恢复徽章。
+const BADGE_FLOW_PRE_SIGN_BADGE_ID = '7bfcdeaa-2348-4460-8dd4-0c9c58b3f27a';
+const BADGE_FLOW_POST_SIGN_BADGE_ID = '8c0d4c23-d22b-4f22-9d18-7088d6d0667d';
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
@@ -338,7 +339,7 @@ async function writeSummary(results, badgeFlowEnabled) {
   const badgeModeText = DRY_RUN
     ? 'dry_run 模式下不执行'
     : badgeFlowEnabled
-      ? `自动开启（检测到已佩戴触发徽章后，签到后等待 ${BADGE_RESTORE_WAIT_MINUTES} 分钟再佩戴）`
+      ? `自动开启（未签到时先佩戴 ${BADGE_FLOW_PRE_SIGN_BADGE_ID}，签到后等待 ${BADGE_RESTORE_WAIT_MINUTES} 分钟再佩戴 ${BADGE_FLOW_POST_SIGN_BADGE_ID}）`
       : '关闭';
 
   const lines = [
@@ -419,37 +420,24 @@ async function main() {
     }
   }
 
-  // 第三阶段：对未签到的账号执行徽章摘除。
+  // 第三阶段：对未签到的账号直接佩戴签到前徽章，不检查当前佩戴状态。
   if (badgeFlowEnabled) {
     const pendingContexts = contexts.filter((context) => context.active && context.result.signedToday !== 'yes');
     for (const context of pendingContexts) {
       try {
-        const userInfoResult = await getUserInfo(context.accessToken);
-        if (!userInfoResult.ok) {
-          context.result.message = appendMessage(context.result.message, userInfoResult.message);
-          log('WARN', `${context.account.label} badge_info_warn - ${userInfoResult.message}`);
-          continue;
-        }
-
-        if (!hasEquippedBadge(userInfoResult.info, BADGE_FLOW_TRIGGER_BADGE_ID)) {
-          context.result.message = appendMessage(context.result.message, `当前佩戴徽章不匹配触发ID（${BADGE_FLOW_TRIGGER_BADGE_ID}），已跳过徽章处理`);
-          log('INFO', `${context.account.label} badge_skip - 触发徽章未佩戴`);
-          continue;
-        }
-
-        const unequipResult = await equipBadge(context.accessToken, BADGE_FLOW_TRIGGER_BADGE_ID, false);
-        if (!unequipResult.ok) {
-          context.result.message = appendMessage(context.result.message, `摘除徽章失败：${unequipResult.message}`);
-          log('WARN', `${context.account.label} badge_unequip_warn - ${unequipResult.message}`);
+        const equipResult = await equipBadge(context.accessToken, BADGE_FLOW_PRE_SIGN_BADGE_ID, true);
+        if (!equipResult.ok) {
+          context.result.message = appendMessage(context.result.message, `签到前佩戴徽章失败：${equipResult.message}`);
+          log('WARN', `${context.account.label} badge_pre_sign_warn - ${equipResult.message}`);
         } else {
           context.needsReequip = true;
-          context.result.message = appendMessage(context.result.message, '已摘除徽章');
-          log('OK', `${context.account.label} badge_unequip_ok - ${unequipResult.message}`);
+          context.result.message = appendMessage(context.result.message, `已佩戴签到前徽章 ${BADGE_FLOW_PRE_SIGN_BADGE_ID}`);
+          log('OK', `${context.account.label} badge_pre_sign_ok - ${equipResult.message}`);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        context.result.message = appendMessage(context.result.message, `摘除徽章失败：${message}`);
-        log('WARN', `${context.account.label} badge_unequip_warn - ${message}`);
+        context.result.message = appendMessage(context.result.message, `签到前佩戴徽章失败：${message}`);
+        log('WARN', `${context.account.label} badge_pre_sign_warn - ${message}`);
       }
     }
   }
@@ -497,19 +485,19 @@ async function main() {
 
     for (const context of contextsNeedEquip) {
       try {
-        const equipResult = await equipBadge(context.accessToken, BADGE_FLOW_TRIGGER_BADGE_ID, true);
+        const equipResult = await equipBadge(context.accessToken, BADGE_FLOW_POST_SIGN_BADGE_ID, true);
         if (!equipResult.ok) {
-          context.result.message = appendMessage(context.result.message, `佩戴徽章失败：${equipResult.message}`);
-          log('WARN', `${context.account.label} badge_equip_warn - ${equipResult.message}`);
+          context.result.message = appendMessage(context.result.message, `签到后佩戴徽章失败：${equipResult.message}`);
+          log('WARN', `${context.account.label} badge_post_sign_warn - ${equipResult.message}`);
           continue;
         }
 
-        context.result.message = appendMessage(context.result.message, '已佩戴徽章');
-        log('OK', `${context.account.label} badge_equip_ok - ${equipResult.message}`);
+        context.result.message = appendMessage(context.result.message, `已佩戴签到后徽章 ${BADGE_FLOW_POST_SIGN_BADGE_ID}`);
+        log('OK', `${context.account.label} badge_post_sign_ok - ${equipResult.message}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        context.result.message = appendMessage(context.result.message, `佩戴徽章失败：${message}`);
-        log('WARN', `${context.account.label} badge_equip_warn - ${message}`);
+        context.result.message = appendMessage(context.result.message, `签到后佩戴徽章失败：${message}`);
+        log('WARN', `${context.account.label} badge_post_sign_warn - ${message}`);
       }
     }
   }
