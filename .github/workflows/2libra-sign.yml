@@ -39,7 +39,7 @@ jobs:
 
       - name: Run auto sign
         env:
-          LIBRA_API_BASE_URL: "https://2libra.aboceder.workers.dev"
+          LIBRA_API_BASE_URL: "https://2libra.com"
           LIBRA_ACCOUNTS_JSON: ${{ secrets.LIBRA_ACCOUNTS_JSON }}
           ACCOUNT_FILTER: ${{ inputs.account || '' }}
           DRY_RUN: ${{ inputs.dry_run || false }}
