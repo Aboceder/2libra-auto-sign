@@ -35,6 +35,11 @@
     "username": "your-email@example.com",
     "password": "your-password",
     "enabled": true
+  },
+  {
+    "label": "Token账号",
+    "accessToken": "your-access-token",
+    "enabled": true
   }
 ]
 ```
@@ -42,9 +47,12 @@
 字段说明：
 
 - `label`：账号备注名称（必填）
-- `username`：登录邮箱（必填）
-- `password`：登录密码（必填）
+- `accessToken`：已有的访问令牌（可选）。配置后会跳过用户名密码登录，直接使用该 token 调用接口
+- `username`：登录邮箱；未配置 `accessToken` 时必填
+- `password`：登录密码；未配置 `accessToken` 时必填
 - `enabled`：是否启用该账号（可选，默认 `true`）
+
+每个账号需要选择一种认证方式：配置 `accessToken`，或同时配置 `username` 和 `password`。如果两者都配置，将优先使用 `accessToken`。访问令牌属于敏感信息，请通过 GitHub Actions Secret 保存，不要提交到仓库。
 
 支持配置多个账号，脚本会按配置逐个处理。
 

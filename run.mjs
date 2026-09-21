@@ -61,13 +61,15 @@ function normalizeAccount(raw, index) {
   const label = String(raw.label || raw.username || `account-${index + 1}`).trim();
   const username = String(raw.username || '').trim();
   const password = String(raw.password || '').trim();
+  const accessToken = String(raw.accessToken || '').trim();
   const enabled = raw.enabled !== false;
 
   if (!label) throw new Error(`第 ${index + 1} 个账号缺少 label`);
-  if (!username) throw new Error(`账号 ${label} 缺少 username`);
-  if (!password) throw new Error(`账号 ${label} 缺少 password`);
+  if (!accessToken && (!username || !password)) {
+    throw new Error(`账号 ${label} 必须配置 accessToken，或同时配置 username 和 password`);
+  }
 
-  return { label, username, password, enabled };
+  return { label, username, password, accessToken, enabled };
 }
 
 function parseAccounts(jsonText) {
@@ -307,8 +309,8 @@ function createContext(account) {
 
   return {
     account,
-    username,
-    accessToken: '',
+    username: username || 'access-token',
+    accessToken: account.accessToken,
     active: true,
     needsReequip: false,
     result: {
@@ -372,8 +374,13 @@ async function main() {
   for (const context of contexts) {
     if (!context.account.enabled) continue;
 
-    log('INFO', `开始登录账号 ${context.account.label}（${context.username}）`);
+    log('INFO', `${context.account.accessToken ? '使用 access token' : '开始登录'}账号 ${context.account.label}（${context.username}）`);
     try {
+      if (context.account.accessToken) {
+        context.result.login = 'access_token';
+        continue;
+      }
+
       const loginResult = await login(context.account);
       if (!loginResult.ok) {
         markFailure(context, 'login', 'login_failed', loginResult.message);
