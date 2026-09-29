@@ -402,6 +402,7 @@ async function writeSummary(results, badgeFlowEnabled) {
 async function main() {
   const accounts = parseAccounts(ACCOUNTS_JSON);
   const badgeFlowEnabled = !DRY_RUN && accounts.some((account) => account.enabled);
+  log('INFO', `接口地址：${API_BASE_URL}`);
   log('INFO', `准备处理 ${accounts.length} 个账号，模式：${DRY_RUN ? 'dry_run' : 'normal'}，徽章流程：${badgeFlowEnabled ? 'on' : 'off'}`);
 
   const contexts = accounts.map(createContext);

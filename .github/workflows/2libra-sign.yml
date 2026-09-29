@@ -10,6 +10,11 @@ on:
         required: false
         default: ""
         type: string
+      api_base_url:
+        description: "接口地址，默认直连 https://2libra.com；排查 CF 拦截时可填 worker 等代理地址"
+        required: false
+        default: "https://2libra.com"
+        type: string
       dry_run:
         description: "只检查是否已签到，不实际执行签到"
         required: false
@@ -39,7 +44,7 @@ jobs:
 
       - name: Run auto sign
         env:
-          LIBRA_API_BASE_URL: "https://2libra.com"
+          LIBRA_API_BASE_URL: ${{ inputs.api_base_url || 'https://2libra.com' }}
           LIBRA_ACCOUNTS_JSON: ${{ secrets.LIBRA_ACCOUNTS_JSON }}
           ACCOUNT_FILTER: ${{ inputs.account || '' }}
           DRY_RUN: ${{ inputs.dry_run || false }}
