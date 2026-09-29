@@ -9,6 +9,25 @@ const SUMMARY_PATH = process.env.GITHUB_STEP_SUMMARY || '';
 // 未签到账号先佩戴该徽章，签到完成后再佩戴恢复徽章。
 const BADGE_FLOW_PRE_SIGN_BADGE_ID = '7bfcdeaa-2348-4460-8dd4-0c9c58b3f27a';
 const BADGE_FLOW_POST_SIGN_BADGE_ID = '8c0d4c23-d22b-4f22-9d18-7088d6d0667d';
+// Node 的 fetch 默认只发 `user-agent: node`，缺少浏览器指纹，容易被 CF 判为脚本。
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+// 站点真实来源。referer/origin 必须指向 2libra.com：源站有 CORS 白名单，
+// 经 worker 代理时若带代理域名会被直接拒绝（Not allowed by CORS）。
+const SITE_ORIGIN = 'https://2libra.com';
+const CF_CHALLENGE_PATTERN = /Just a moment|cf-browser-verification|__cf_chl|Attention Required!|Sorry, you have been blocked/i;
+
+function browserHeaders(extra) {
+  return {
+    'user-agent': BROWSER_UA,
+    accept: 'application/json, text/plain, */*',
+    'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    referer: `${SITE_ORIGIN}/`,
+    ...extra
+  };
+}
 
 function isTrue(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
@@ -107,9 +126,39 @@ function parseAccounts(jsonText) {
   return filtered;
 }
 
+// 失败时把 CF 相关响应头和挑战页特征带进日志，便于区分是业务错误还是被盾拦截。
+function responseDiagnostics(response, text) {
+  const parts = [];
+
+  for (const headerName of ['cf-mitigated', 'cf-ray', 'server']) {
+    const value = response.headers.get(headerName);
+    if (value) parts.push(`${headerName}=${value}`);
+  }
+
+  if (CF_CHALLENGE_PATTERN.test(String(text || ''))) parts.push('疑似 CF 挑战页');
+  return parts.join(' ');
+}
+
+function withDiagnostics(message, diagnostics) {
+  return diagnostics ? `${message}（${diagnostics}）` : message;
+}
+
 async function requestJson(path, options) {
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`请求 ${API_BASE_URL}${path} 失败：${message}`);
+  }
+
   const text = await response.text();
+  const diagnostics = responseDiagnostics(response, text);
+
+  // 挑战页也可能带着 200 返回，提前抛出，避免后面把整页 HTML 当错误信息打出来。
+  if (CF_CHALLENGE_PATTERN.test(text)) {
+    throw new Error(`疑似被 Cloudflare 拦截，HTTP ${response.status}${diagnostics ? `（${diagnostics}）` : ''}`);
+  }
 
   let json = null;
   if (text) {
@@ -120,16 +169,13 @@ async function requestJson(path, options) {
     }
   }
 
-  return { response, text, json };
+  return { response, text, json, diagnostics };
 }
 
 async function login(account) {
-  const { response, json, text } = await requestJson('/api/auth/login', {
+  const { response, json, text, diagnostics } = await requestJson('/api/auth/login', {
     method: 'POST',
-    headers: {
-      accept: 'application/json, text/plain, */*',
-      'content-type': 'application/json'
-    },
+    headers: browserHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({
       username: account.username,
       password: account.password,
@@ -140,7 +186,7 @@ async function login(account) {
   if (!response.ok) {
     return {
       ok: false,
-      message: `登录失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`
+      message: withDiagnostics(`登录失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`, diagnostics)
     };
   }
 
@@ -156,18 +202,15 @@ async function login(account) {
 }
 
 async function checkToday(accessToken) {
-  const { response, json, text } = await requestJson('/api/sign/today', {
+  const { response, json, text, diagnostics } = await requestJson('/api/sign/today', {
     method: 'GET',
-    headers: {
-      accept: 'application/json, text/plain, */*',
-      authorization: `Bearer ${accessToken}`
-    }
+    headers: browserHeaders({ authorization: `Bearer ${accessToken}` })
   });
 
   if (!response.ok) {
     return {
       ok: false,
-      message: `查询签到状态失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`
+      message: withDiagnostics(`查询签到状态失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`, diagnostics)
     };
   }
 
@@ -182,18 +225,15 @@ async function checkToday(accessToken) {
 }
 
 async function signToday(accessToken) {
-  const { response, json, text } = await requestJson('/api/sign', {
+  const { response, json, text, diagnostics } = await requestJson('/api/sign', {
     method: 'POST',
-    headers: {
-      accept: 'application/json, text/plain, */*',
-      authorization: `Bearer ${accessToken}`
-    }
+    headers: browserHeaders({ authorization: `Bearer ${accessToken}` })
   });
 
   if (!response.ok) {
     return {
       ok: false,
-      message: `执行签到失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`
+      message: withDiagnostics(`执行签到失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`, diagnostics)
     };
   }
 
@@ -204,18 +244,15 @@ async function signToday(accessToken) {
 }
 
 async function getUserInfo(accessToken) {
-  const { response, json, text } = await requestJson('/api/users/info?fields=info,exp,coins', {
+  const { response, json, text, diagnostics } = await requestJson('/api/users/info?fields=info,exp,coins', {
     method: 'GET',
-    headers: {
-      accept: 'application/json, text/plain, */*',
-      authorization: `Bearer ${accessToken}`
-    }
+    headers: browserHeaders({ authorization: `Bearer ${accessToken}` })
   });
 
   if (!response.ok) {
     return {
       ok: false,
-      message: `查询用户信息失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`
+      message: withDiagnostics(`查询用户信息失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`, diagnostics)
     };
   }
 
@@ -243,13 +280,12 @@ function hasEquippedBadge(userInfo, badgeId) {
 
 async function equipBadge(accessToken, badgeId, equip) {
   const actionText = equip ? '佩戴' : '摘下';
-  const { response, json, text } = await requestJson('/api/badges/equip', {
+  const { response, json, text, diagnostics } = await requestJson('/api/badges/equip', {
     method: 'POST',
-    headers: {
-      accept: 'application/json, text/plain, */*',
+    headers: browserHeaders({
       'content-type': 'application/json',
       authorization: `Bearer ${accessToken}`
-    },
+    }),
     body: JSON.stringify({
       badge_id: badgeId,
       equip
@@ -259,7 +295,7 @@ async function equipBadge(accessToken, badgeId, equip) {
   if (!response.ok) {
     return {
       ok: false,
-      message: `${actionText}徽章失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`
+      message: withDiagnostics(`${actionText}徽章失败，HTTP ${response.status}：${getMessage(json, text || '未知错误')}`, diagnostics)
     };
   }
 
